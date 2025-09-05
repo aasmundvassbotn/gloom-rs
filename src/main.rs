@@ -15,6 +15,8 @@ use std::sync::{Mutex, Arc, RwLock};
 mod shader;
 mod util;
 
+use gl::types::GLuint;
+use gl::ARRAY_BUFFER;
 use glutin::event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState::{Pressed, Released}, VirtualKeyCode::{self, *}};
 use glutin::event_loop::ControlFlow;
 
@@ -60,16 +62,90 @@ unsafe fn create_vao(vertices: &Vec<f32>, indices: &Vec<u32>) -> u32 {
 
     // This should:
     // * Generate a VAO and bind it
-    // * Generate a VBO and bind it
-    // * Fill it with data
-    // * Configure a VAP for the data and enable it
-    // * Generate a IBO and bind it
-    // * Fill it with data
-    // * Return the ID of the VAO
+    let mut vao: u32 = 0;
+    gl::GenVertexArrays(1, &mut vao);  
+    gl::BindVertexArray(vao);
 
-    0
+    // * Generate a VBO and bind it
+    let mut vbo: u32 = 0;
+    gl::GenBuffers(1, &mut vbo);
+    gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+
+    // * Fill it with data
+    gl::BufferData(
+        gl::ARRAY_BUFFER, 
+        byte_size_of_array(vertices), 
+        pointer_to_array(vertices), 
+        gl::STATIC_DRAW,);
+
+    let stride = (6 * std::mem::size_of::<f32>()) as gl::types::GLsizei;
+    // * Configure a VAP for the data and enable it
+    gl::EnableVertexAttribArray(0);
+    gl::VertexAttribPointer(
+        0,
+        3,
+        gl::FLOAT,
+        gl::FALSE,
+        stride, // I assume this value is correct, since from my knowledge, only 3D coords are being submitted
+        ptr::null() 
+    );
+
+    gl::EnableVertexAttribArray(1);
+    gl::VertexAttribPointer(
+        1,                                       // index (matches layout location = 1)
+        3,                                       // size (r,g,b)
+        gl::FLOAT,
+        gl::FALSE,
+        stride,                                  // same stride
+        (3 * std::mem::size_of::<f32>()) as *const _  // offset: skip 3 floats (position)
+    );
+
+    // * Generate a IBO and bind it
+    let mut ebo: u32 = 0;
+    gl::GenBuffers(1, &mut ebo);
+    gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
+
+    // * Fill it with data
+    gl::BufferData(
+        gl::ELEMENT_ARRAY_BUFFER,
+        byte_size_of_array(indices),
+        pointer_to_array(indices),
+        gl::STATIC_DRAW,
+    );
+    
+    // * Return the ID of the VAO
+    vao
 }
 
+// I just assume the color red, and i just use z = 0. So just in xy-plane
+fn vertices_and_indices_circle(cx: f32, cy: f32, r: f32) -> (Vec<f32>, Vec<u32>){
+    let segments: usize = 16;
+
+    // x, y, z, r, g, b
+    let mut vertices = Vec::<f32>::with_capacity((segments + 1) * 6);
+    let mut indices  = Vec::<u32>::with_capacity(segments * 3);
+
+    // Center
+    vertices.extend_from_slice(&[cx, cy, 0.0, 1.0, 0.0, 0.0]);
+
+    // Constr circlepoints with maths
+    let two_pi = std::f32::consts::PI * 2.0;
+    for i in 0..segments {
+        let t = i as f32 * two_pi / segments as f32;
+        let x = cx + r * t.cos();
+        let y = cy + r * t.sin();
+        vertices.extend_from_slice(&[x, y, 0.0, 1.0, 0.0, 0.0]);
+    }
+
+    // Indices
+    for i in 0..segments {
+        let i1 = (i as u32) + 1;
+        let i2 = ((i as u32 + 1) % segments as u32) + 1;
+        indices.extend_from_slice(&[0, i1, i2]);
+    }
+
+    (vertices, indices)
+}
 
 fn main() {
     // Set up the necessary objects to deal with windows and event handling
@@ -117,7 +193,7 @@ fn main() {
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
             gl::DepthFunc(gl::LESS);
-            gl::Enable(gl::CULL_FACE);
+            //gl::Enable(gl::CULL_FACE);
             gl::Disable(gl::MULTISAMPLE);
             gl::Enable(gl::BLEND);
             gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
@@ -131,12 +207,58 @@ fn main() {
         }
 
         // == // Set up your VAO around here
+        
+        let vertices: Vec<f32> = vec![
+            // Five triangles. 
+            // x, y, z,   red, green, blue,
+            -0.9, -0.4, 0.0,   1.0, 0.2, 0.2,   // 0
+            -0.2, -0.3, 0.0,   1.0, 0.2, 0.2,   // 1
+            -0.5,  0.0, 0.0,   1.0, 0.2, 0.2,   // 2
 
-        let my_vao = unsafe { 1337 };
+            0.1, -0.5, 0.0,   0.2, 1.0, 0.2,   // 3
+            0.8, -0.4, 0.0,   0.2, 1.0, 0.2,   // 4
+            0.5,  0.1, 0.0,   0.2, 1.0, 0.2,   // 5
 
+            -0.3,  0.3, 0.0,   0.2, 0.2, 1.0,   // 6
+            0.3,  0.1, 0.0,   0.2, 0.2, 1.0,   // 7
+            0.0,  0.8, 0.0,   0.2, 0.2, 1.0,   // 8
+
+            -0.9,  0.2, 0.0,   1.0, 0.0, 1.0,   // 9
+            -0.4,  0.1, 0.0,   1.0, 0.0, 1.0,   // 10
+            -0.65, 0.8, 0.0,   1.0, 0.0, 1.0,   // 11
+
+            -0.1,  0.9, 0.0,   1.0, 1.0, 0.2,   // 12
+            0.4,  0.3, 0.0,   1.0, 1.0, 0.2,   // 13
+            0.7,  0.9, 0.0,   1.0, 1.0, 0.2,   // 14
+
+            // Clipped object
+            // 0.6, -0.8, -1.2, 1.0, 0.2, 0.2, 
+            // 0.0, 0.4, 0.0,   1.0, 0.2, 0.2, 
+            // -0.8, -0.2, 1.2, 1.0, 0.2, 0.2,
+            
+        ];
+
+        let indices: Vec<u32> = vec![
+            // Five triangles
+            0, 1, 2,
+            3, 4, 5,
+            6, 7, 8,
+            9, 10, 11,
+            12, 13, 14,
+
+        ];
+
+        // Circle
+        // let (vertices, indices) = vertices_and_indices_circle(0.0, 0.0, 0.8);
+
+
+        let my_vao = unsafe {
+            let vao = create_vao(&vertices, &indices);
+            vao
+        };
+        let index_count = indices.len() as i32; // keep this for gl::DrawElements
 
         // == // Set up your shaders here
-
         // Basic usage of shader helper:
         // The example code below creates a 'shader' object.
         // It which contains the field `.program_id` and the method `.activate()`.
@@ -144,14 +266,12 @@ fn main() {
         // This snippet is not enough to do the exercise, and will need to be modified (outside
         // of just using the correct path), but it only needs to be called once
 
-        /*
         let simple_shader = unsafe {
             shader::ShaderBuilder::new()
-                .attach_file("./path/to/simple/shader.file")
+                .attach_file("./shaders/simple.frag")
+                .attach_file("./shaders/simple.vert")
                 .link()
         };
-        */
-
 
         // Used to demonstrate keyboard handling for exercise 2.
         let mut _arbitrary_number = 0.0; // feel free to remove
@@ -217,8 +337,9 @@ fn main() {
 
 
                 // == // Issue the necessary gl:: commands to draw your scene here
-
-
+                simple_shader.activate();
+                gl::BindVertexArray(my_vao);
+                gl::DrawElements(gl::TRIANGLES, index_count, gl::UNSIGNED_INT, std::ptr::null());
 
             }
 
