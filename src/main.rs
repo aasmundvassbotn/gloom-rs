@@ -15,8 +15,8 @@ use std::sync::{Mutex, Arc, RwLock};
 mod shader;
 mod util;
 
-use gl::types::GLuint;
-use gl::ARRAY_BUFFER;
+use std::ffi::CString;
+
 use glutin::event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState::{Pressed, Released}, VirtualKeyCode::{self, *}};
 use glutin::event_loop::ControlFlow;
 
@@ -193,7 +193,9 @@ fn main() {
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
             gl::DepthFunc(gl::LESS);
-            //gl::Enable(gl::CULL_FACE);
+            // After i changed some of the drawing process in order to make the flipping of
+            // the scene possible, i needed to disable culling
+            // gl::Enable(gl::CULL_FACE);
             gl::Disable(gl::MULTISAMPLE);
             gl::Enable(gl::BLEND);
             gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
@@ -272,6 +274,12 @@ fn main() {
                 .attach_file("./shaders/simple.vert")
                 .link()
         };
+        
+        let u_transform_loc = unsafe {
+            let name = CString::new("uTransform").unwrap();
+            gl::GetUniformLocation(simple_shader.program_id, name.as_ptr())
+        };
+
 
         // Used to demonstrate keyboard handling for exercise 2.
         let mut _arbitrary_number = 0.0; // feel free to remove
@@ -338,6 +346,15 @@ fn main() {
 
                 // == // Issue the necessary gl:: commands to draw your scene here
                 simple_shader.activate();
+
+                // To flip the scene we insert these coordinates: (-1.0, -1.0, 1.0)
+                // Just change the signs of the x and y axis.
+                let reflect = glm::scaling(&glm::vec3(1.0, 1.0, 1.0)); 
+                gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, reflect.as_ptr());
+
+                // Because scaling by -1 flips triangle winding, fix culling:
+                gl::FrontFace(gl::CW); // default is CCW; switch to CW when mirrored
+
                 gl::BindVertexArray(my_vao);
                 gl::DrawElements(gl::TRIANGLES, index_count, gl::UNSIGNED_INT, std::ptr::null());
 
