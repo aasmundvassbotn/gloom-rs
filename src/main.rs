@@ -379,15 +379,50 @@ fn main() {
 
                 // To flip the scene we insert these coordinates: (-1.0, -1.0, 1.0)
                 // Just change the signs of the x and y axis.
-                let reflect = glm::scaling(&glm::vec3(-1.0, -1.0, 1.0)); 
-                gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, reflect.as_ptr());
+                // let reflect = glm::scaling(&glm::vec3(-1.0, -1.0, 1.0)); 
+                // gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, reflect.as_ptr());
 
-                gl::BindVertexArray(my_vao);
+                // Make matrix mut so we can apply scaling, rotation etc. as we go
+                let mut model = glm::Mat4::identity();
+
+                let oscillation = elapsed.sin();
+
+                // Scaling: Changes size. Just multiplies the stuff with a value to scale it
+                let a = 0.7;
+                let e = 0.7;
+                let scaling = glm::scaling(&glm::vec3(a, e, 1.0));
+                model = scaling * model;
+
+                // Shearing. There isnt a specific method for this, so we insert into matrix directly
+                let b = 0.0; 
+                let d = 0.0; 
+                let shear = glm::mat4(
+                    1.0, d,   0.0, 0.0,
+                    b,   1.0, 0.0, 0.0,
+                    0.0, 0.0, 1.0, 0.0,
+                    0.0, 0.0, 0.0, 1.0,
+                );
+                model = shear * model;
+
+                // Figure rotation. 
+                // let rotation = glm::rotation(elapsed, &glm::vec3(0.0, 0.0, 1.0));
+                // model = rotation * model;
+
+                // Transformation
+                let c = 0.5;
+                let f = 0.0;
+                let translation = glm::translation(&glm::vec3(c, f, -5.0));
+
+                model = translation * model;
+
+                let projection: glm::Mat4 = glm::perspective(window_aspect_ratio, 0.6, 1.0, 100.0);
+                model = projection * model;
+
+                gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, model.as_ptr());
 
                 gl::DepthMask(gl::FALSE); // Disable while drawing, then enable again               
                 gl::DrawElements(gl::TRIANGLES, index_count, gl::UNSIGNED_INT, std::ptr::null());
                 gl::DepthMask(gl::TRUE);
-
 
             }
 
