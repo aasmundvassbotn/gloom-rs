@@ -55,7 +55,7 @@ fn offset<T>(n: u32) -> *const c_void {
 
 
 // == // Generate your VAO here
-unsafe fn create_vao(vertices: &Vec<f32>, indices: &Vec<u32>) -> u32 {
+unsafe fn create_vao(vertices: &Vec<f32>, vertices_color: &Vec<f32>, indices: &Vec<u32>) -> u32 {
     // Implement me!
 
     // Also, feel free to delete comments :)
@@ -67,37 +67,49 @@ unsafe fn create_vao(vertices: &Vec<f32>, indices: &Vec<u32>) -> u32 {
     gl::BindVertexArray(vao);
 
     // * Generate a VBO and bind it
-    let mut vbo: u32 = 0;
-    gl::GenBuffers(1, &mut vbo);
-    gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+    let mut vbo_pos: u32 = 0;
+    gl::GenBuffers(1, &mut vbo_pos);
+    gl::BindBuffer(gl::ARRAY_BUFFER, vbo_pos);
 
-    // * Fill it with data
     gl::BufferData(
         gl::ARRAY_BUFFER, 
         byte_size_of_array(vertices), 
-        pointer_to_array(vertices), 
-        gl::STATIC_DRAW,);
+        pointer_to_array(vertices),
+        gl::STATIC_DRAW
+    );
 
-    let stride = (6 * std::mem::size_of::<f32>()) as gl::types::GLsizei;
-    // * Configure a VAP for the data and enable it
+    let pos_stride = 3 * size_of::<f32>();
+
     gl::EnableVertexAttribArray(0);
     gl::VertexAttribPointer(
         0,
         3,
         gl::FLOAT,
         gl::FALSE,
-        stride, // I assume this value is correct, since from my knowledge, only 3D coords are being submitted
+        pos_stride,
         ptr::null() 
     );
-
+    
+    let mut vbo_colors: u32 = 0;
+    gl::GenBuffers(1, &mut vbo_colors);
+    gl::BindBuffer(gl::ARRAY_BUFFER, vbo_colors);
+    
+    gl::BufferData(
+        gl::ARRAY_BUFFER,
+        byte_size_of_array(vertices_color), 
+        pointer_to_array(vertices_color),
+        gl::STATIC_DRAW
+    );
+    
+    let color_stride = 4 * size_of::<f32>();
     gl::EnableVertexAttribArray(1);
     gl::VertexAttribPointer(
-        1,                                       // index (matches layout location = 1)
-        3,                                       // size (r,g,b)
+        1, 
+        4,
         gl::FLOAT,
         gl::FALSE,
-        stride,                                  // same stride
-        (3 * std::mem::size_of::<f32>()) as *const _  // offset: skip 3 floats (position)
+        color_stride,
+        ptr::null() 
     );
 
     // * Generate a IBO and bind it
@@ -195,7 +207,7 @@ fn main() {
             gl::DepthFunc(gl::LESS);
             // After i changed some of the drawing process in order to make the flipping of
             // the scene possible, i needed to disable culling
-            // gl::Enable(gl::CULL_FACE);
+            gl::Enable(gl::CULL_FACE);
             gl::Disable(gl::MULTISAMPLE);
             gl::Enable(gl::BLEND);
             gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
@@ -211,27 +223,25 @@ fn main() {
         // == // Set up your VAO around here
         
         let vertices: Vec<f32> = vec![
-            // Five triangles. 
-            // x, y, z,   red, green, blue,
-            -0.9, -0.4, 0.0,   1.0, 0.2, 0.2,   // 0
-            -0.2, -0.3, 0.0,   1.0, 0.2, 0.2,   // 1
-            -0.5,  0.0, 0.0,   1.0, 0.2, 0.2,   // 2
+            -1.0, 0.0, -0.2, // 0
+            0.4, -0.4, -0.2, // 1
+            0.4, 0.4, -0.2, // 2
 
-            0.1, -0.5, 0.0,   0.2, 1.0, 1.0,   // 3
-            0.8, -0.4, 0.0,   0.2, 1.0, 1.0,   // 4
-            0.5,  0.1, 0.0,   0.2, 1.0, 1.0,   // 5
+            -0.8, 0.3, 0.0,  // 3
+            -0.8, -0.3, 0.0,  // 4
+            0.0,  -0.5, 0.0,  // 5
 
-            -0.3,  0.3, 0.0,   0.2, 0.2, 1.0,   // 6
-            0.3,  0.1, 0.0,   0.2, 0.2, 1.0,   // 7
-            0.0,  0.8, 0.0,   0.2, 0.2, 1.0,   // 8
+            0.4,  1.0, 0.2,  // 6
+            -0.4, 1.0, 0.2, // 7
+            -0.6, -0.7, 0.2,  // 8
 
-            -0.9,  0.2, 0.0,   1.0, 0.0, 1.0,   // 9
-            -0.4,  0.1, 0.0,   1.0, 0.0, 1.0,   // 10
-            -0.65, 0.8, 0.0,   1.0, 0.0, 1.0,   // 11
+            // -0.9,  0.2, 0.0, // 9
+            // -0.4,  0.9, 0.0, // 10
+            // -0.65, 0.8, 0.0, // 11
 
-            -0.1,  0.9, 0.0,   1.0, 1.0, 0.2,   // 12
-            0.4,  0.3, 0.0,   1.0, 1.0, 0.2,   // 13
-            0.7,  0.9, 0.0,   1.0, 1.0, 0.2,   // 14
+            // -0.1,  0.9, 0.0, // 12
+            // 0.4,  0.3, 0.0,  // 13
+            // 0.7,  0.9, 0.0,  // 14
 
             // Clipped object
             // 0.6, -0.8, -1.2, 1.0, 0.2, 0.2, 
@@ -240,13 +250,36 @@ fn main() {
             
         ];
 
+        let vertcies_colors: Vec<f32>= vec![
+            1.0, 0.2, 0.2, 0.5,
+            1.0, 0.2, 0.2, 0.5,
+            1.0, 0.2, 0.2, 0.5,
+            
+            0.2, 1.0, 0.2, 0.5,
+            0.2, 1.0, 0.2, 0.5,
+            0.2, 1.0, 0.2, 0.5,
+            
+            0.2, 0.2, 1.0, 0.5,
+            0.2, 0.2, 1.0, 0.5,
+            0.2, 0.2, 1.0, 0.5,
+            
+
+            // 0.4, 0.5, 1.0, 0.5,
+            // 1.0, 0.0, 0.0, 0.5,
+            // 0.8, 0.0, 0.5, 0.5,
+
+            // 0.6, 0.8, 0.0, 0.5,
+            // 1.0, 0.5, 0.0, 0.5,
+            // 0.2, 1.0, 0.9, 0.5,
+        ];
+
         let indices: Vec<u32> = vec![
             // Five triangles
             0, 1, 2,
             3, 4, 5,
             6, 7, 8,
-            9, 10, 11,
-            12, 13, 14,
+            // 9, 10, 11,
+            // 12, 13, 14,
 
         ];
 
@@ -255,7 +288,7 @@ fn main() {
 
 
         let my_vao = unsafe {
-            let vao = create_vao(&vertices, &indices);
+            let vao = create_vao(&vertices, &vertcies_colors, &indices);
             vao
         };
         let index_count = indices.len() as i32; // keep this for gl::DrawElements
@@ -336,27 +369,25 @@ fn main() {
             }
 
             // == // Please compute camera transforms here (exercise 2 & 3)
-
-
             unsafe {
                 // Clear the color and depth buffers
                 gl::ClearColor(0.035, 0.046, 0.078, 1.0); // night sky
                 gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-
 
                 // == // Issue the necessary gl:: commands to draw your scene here
                 simple_shader.activate();
 
                 // To flip the scene we insert these coordinates: (-1.0, -1.0, 1.0)
                 // Just change the signs of the x and y axis.
-                let reflect = glm::scaling(&glm::vec3(1.0, 1.0, 1.0)); 
+                let reflect = glm::scaling(&glm::vec3(-1.0, -1.0, 1.0)); 
                 gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, reflect.as_ptr());
 
-                // Because scaling by -1 flips triangle winding, fix culling:
-                gl::FrontFace(gl::CW); // default is CCW; switch to CW when mirrored
-
                 gl::BindVertexArray(my_vao);
+
+                gl::DepthMask(gl::FALSE); // Disable while drawing, then enable again               
                 gl::DrawElements(gl::TRIANGLES, index_count, gl::UNSIGNED_INT, std::ptr::null());
+                gl::DepthMask(gl::TRUE);
+
 
             }
 
