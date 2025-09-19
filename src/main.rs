@@ -24,8 +24,6 @@ use glutin::event_loop::ControlFlow;
 const INITIAL_SCREEN_W: u32 = 800;
 const INITIAL_SCREEN_H: u32 = 600;
 
-// == // Helper functions to make interacting with OpenGL a little bit prettier. You *WILL* need these! // == //
-
 // Get the size of an arbitrary array of numbers measured in bytes
 // Example usage:  byte_size_of_array(my_array)
 fn byte_size_of_array<T>(val: &[T]) -> isize {
@@ -50,23 +48,11 @@ fn offset<T>(n: u32) -> *const c_void {
     (n * mem::size_of::<T>() as u32) as *const T as *const c_void
 }
 
-// Get a null pointer (equivalent to an offset of 0)
-// ptr::null()
-
-
-// == // Generate your VAO here
 unsafe fn create_vao(vertices: &Vec<f32>, vertices_color: &Vec<f32>, indices: &Vec<u32>) -> u32 {
-    // Implement me!
-
-    // Also, feel free to delete comments :)
-
-    // This should:
-    // * Generate a VAO and bind it
     let mut vao: u32 = 0;
     gl::GenVertexArrays(1, &mut vao);  
     gl::BindVertexArray(vao);
 
-    // * Generate a VBO and bind it
     let mut vbo_pos: u32 = 0;
     gl::GenBuffers(1, &mut vbo_pos);
     gl::BindBuffer(gl::ARRAY_BUFFER, vbo_pos);
@@ -112,12 +98,9 @@ unsafe fn create_vao(vertices: &Vec<f32>, vertices_color: &Vec<f32>, indices: &V
         ptr::null() 
     );
 
-    // * Generate a IBO and bind it
     let mut ebo: u32 = 0;
     gl::GenBuffers(1, &mut ebo);
     gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
-
-    // * Fill it with data
     gl::BufferData(
         gl::ELEMENT_ARRAY_BUFFER,
         byte_size_of_array(indices),
@@ -125,7 +108,6 @@ unsafe fn create_vao(vertices: &Vec<f32>, vertices_color: &Vec<f32>, indices: &V
         gl::STATIC_DRAW,
     );
     
-    // * Return the ID of the VAO
     vao
 }
 
@@ -205,8 +187,6 @@ fn main() {
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
             gl::DepthFunc(gl::LESS);
-            // After i changed some of the drawing process in order to make the flipping of
-            // the scene possible, i needed to disable culling
             gl::Enable(gl::CULL_FACE);
             gl::Disable(gl::MULTISAMPLE);
             gl::Enable(gl::BLEND);
@@ -220,8 +200,6 @@ fn main() {
             println!("GLSL\t: {}", util::get_gl_string(gl::SHADING_LANGUAGE_VERSION));
         }
 
-        // == // Set up your VAO around here
-        
         let vertices: Vec<f32> = vec![
             -1.0, 0.0, -0.2, // 0
             0.4, -0.4, -0.2, // 1
@@ -242,11 +220,6 @@ fn main() {
             // -0.1,  0.9, 0.0, // 12
             // 0.4,  0.3, 0.0,  // 13
             // 0.7,  0.9, 0.0,  // 14
-
-            // Clipped object
-            // 0.6, -0.8, -1.2, 1.0, 0.2, 0.2, 
-            // 0.0, 0.4, 0.0,   1.0, 0.2, 0.2, 
-            // -0.8, -0.2, 1.2, 1.0, 0.2, 0.2,
             
         ];
 
@@ -274,7 +247,6 @@ fn main() {
         ];
 
         let indices: Vec<u32> = vec![
-            // Five triangles
             0, 1, 2,
             3, 4, 5,
             6, 7, 8,
@@ -321,6 +293,11 @@ fn main() {
         // The main rendering loop
         let first_frame_time = std::time::Instant::now();
         let mut previous_frame_time = first_frame_time;
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut z = -3.0;
+        let mut theta_x: f32 = 0.0;
+        let mut theta_y: f32 = 0.0;
         loop {
             // Compute time passed since the previous frame and since the start of the program
             let now = std::time::Instant::now();
@@ -346,13 +323,18 @@ fn main() {
                         // The `VirtualKeyCode` enum is defined here:
                         //    https://docs.rs/winit/0.25.0/winit/event/enum.VirtualKeyCode.html
 
-                        VirtualKeyCode::A => {
-                            _arbitrary_number += delta_time;
-                        }
-                        VirtualKeyCode::D => {
-                            _arbitrary_number -= delta_time;
-                        }
+                        VirtualKeyCode::A => {x += delta_time;}
+                        VirtualKeyCode::D => {x -= delta_time;}
+                        VirtualKeyCode::W => {y -= delta_time;}
+                        VirtualKeyCode::S => {y += delta_time;}
 
+                        VirtualKeyCode::Space =>  {z += delta_time;}
+                        VirtualKeyCode::LShift => {z -= delta_time;}
+
+                        VirtualKeyCode::Up =>     {theta_x -= delta_time;}
+                        VirtualKeyCode::Down =>   {theta_x += delta_time;}
+                        VirtualKeyCode::Right =>  {theta_y += delta_time;}
+                        VirtualKeyCode::Left =>   {theta_y -= delta_time;}
 
                         // default handler:
                         _ => { }
@@ -382,40 +364,44 @@ fn main() {
                 // let reflect = glm::scaling(&glm::vec3(-1.0, -1.0, 1.0)); 
                 // gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, reflect.as_ptr());
 
-                // Make matrix mut so we can apply scaling, rotation etc. as we go
+                // let oscillation = elapsed.sin();
+                
                 let mut model = glm::Mat4::identity();
 
-                let oscillation = elapsed.sin();
-
                 // Scaling: Changes size. Just multiplies the stuff with a value to scale it
-                let a = 0.7;
-                let e = 0.7;
-                let scaling = glm::scaling(&glm::vec3(a, e, 1.0));
-                model = scaling * model;
+                // let a = 1.0 * oscillation;
+                // let e = 1.0;
+                // let scaling = glm::scaling(&glm::vec3(a, e, 1.0));
+                // model = scaling * model;
 
                 // Shearing. There isnt a specific method for this, so we insert into matrix directly
-                let b = 0.0; 
-                let d = 0.0; 
-                let shear = glm::mat4(
-                    1.0, d,   0.0, 0.0,
-                    b,   1.0, 0.0, 0.0,
-                    0.0, 0.0, 1.0, 0.0,
-                    0.0, 0.0, 0.0, 1.0,
-                );
-                model = shear * model;
+                // let b = 0.0 * oscillation; 
+                // let d = 0.0; 
+                // let shear = glm::mat4(
+                //     1.0, d,   0.0, 0.0,
+                //     b,   1.0, 0.0, 0.0,
+                //     0.0, 0.0, 1.0, 0.0,
+                //     0.0, 0.0, 0.0, 1.0,
+                // );
+                // model = shear * model;
 
                 // Figure rotation. 
                 // let rotation = glm::rotation(elapsed, &glm::vec3(0.0, 0.0, 1.0));
                 // model = rotation * model;
 
-                // Transformation
-                let c = 0.5;
-                let f = 0.0;
-                let translation = glm::translation(&glm::vec3(c, f, -5.0));
+                // Translation
+                // let c = 0.0 * oscillation;
+                // let f = 0.0;
 
+                let translation = glm::translation(&glm::vec3(x, y, z));
                 model = translation * model;
 
+                let rotate_x_axis = glm::rotate_x(&model, theta_x);
+                let rotate_y_axis = glm::rotate_y(&model, theta_y);
+                model = rotate_x_axis* rotate_y_axis * model;
+
                 let projection: glm::Mat4 = glm::perspective(window_aspect_ratio, 0.6, 1.0, 100.0);
+
                 model = projection * model;
 
                 gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, model.as_ptr());
