@@ -14,11 +14,14 @@ use std::sync::{Mutex, Arc, RwLock};
 
 mod shader;
 mod util;
+mod mesh;
 
 use std::ffi::CString;
 
 use glutin::event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState::{Pressed, Released}, VirtualKeyCode::{self, *}};
 use glutin::event_loop::ControlFlow;
+
+use crate::mesh::Mesh;
 
 // initial window size
 const INITIAL_SCREEN_W: u32 = 800;
@@ -48,7 +51,7 @@ fn offset<T>(n: u32) -> *const c_void {
     (n * mem::size_of::<T>() as u32) as *const T as *const c_void
 }
 
-unsafe fn create_vao(vertices: &Vec<f32>, vertices_color: &Vec<f32>, indices: &Vec<u32>) -> u32 {
+unsafe fn create_vao(vertices: &Vec<f32>, vertices_color: &Vec<f32>, indices: &Vec<u32>, normals: &Vec<f32>) -> u32 {
     let mut vao: u32 = 0;
     gl::GenVertexArrays(1, &mut vao);  
     gl::BindVertexArray(vao);
@@ -95,6 +98,28 @@ unsafe fn create_vao(vertices: &Vec<f32>, vertices_color: &Vec<f32>, indices: &V
         gl::FLOAT,
         gl::FALSE,
         color_stride,
+        ptr::null() 
+    );
+
+    let mut vbo_normals: u32 = 0;
+    gl::GenBuffers(1, &mut vbo_normals);
+    gl::BindBuffer(gl::ARRAY_BUFFER, vbo_normals);
+    
+    gl::BufferData(
+        gl::ARRAY_BUFFER,
+        byte_size_of_array(normals), 
+        pointer_to_array(normals),
+        gl::STATIC_DRAW
+    );
+    
+    let normals_stride = 3 * size_of::<f32>();
+    gl::EnableVertexAttribArray(2);
+    gl::VertexAttribPointer(
+        2, 
+        3,
+        gl::FLOAT,
+        gl::FALSE,
+        normals_stride,
         ptr::null() 
     );
 
@@ -200,72 +225,18 @@ fn main() {
             println!("GLSL\t: {}", util::get_gl_string(gl::SHADING_LANGUAGE_VERSION));
         }
 
-        let vertices: Vec<f32> = vec![
-            -1.0, 0.0, -0.2, // 0
-            0.4, -0.4, -0.2, // 1
-            0.4, 0.4, -0.2, // 2
-
-            -0.8, 0.3, 0.0,  // 3
-            -0.8, -0.3, 0.0,  // 4
-            0.0,  -0.5, 0.0,  // 5
-
-            0.4,  1.0, 0.2,  // 6
-            -0.4, 1.0, 0.2, // 7
-            -0.6, -0.7, 0.2,  // 8
-
-            // -0.9,  0.2, 0.0, // 9
-            // -0.4,  0.9, 0.0, // 10
-            // -0.65, 0.8, 0.0, // 11
-
-            // -0.1,  0.9, 0.0, // 12
-            // 0.4,  0.3, 0.0,  // 13
-            // 0.7,  0.9, 0.0,  // 14
-            
-        ];
-
-        let vertcies_colors: Vec<f32>= vec![
-            1.0, 0.2, 0.2, 0.5,
-            1.0, 0.2, 0.2, 0.5,
-            1.0, 0.2, 0.2, 0.5,
-            
-            0.2, 1.0, 0.2, 0.5,
-            0.2, 1.0, 0.2, 0.5,
-            0.2, 1.0, 0.2, 0.5,
-            
-            0.2, 0.2, 1.0, 0.5,
-            0.2, 0.2, 1.0, 0.5,
-            0.2, 0.2, 1.0, 0.5,
-            
-
-            // 0.4, 0.5, 1.0, 0.5,
-            // 1.0, 0.0, 0.0, 0.5,
-            // 0.8, 0.0, 0.5, 0.5,
-
-            // 0.6, 0.8, 0.0, 0.5,
-            // 1.0, 0.5, 0.0, 0.5,
-            // 0.2, 1.0, 0.9, 0.5,
-        ];
-
-        let indices: Vec<u32> = vec![
-            0, 1, 2,
-            3, 4, 5,
-            6, 7, 8,
-            // 9, 10, 11,
-            // 12, 13, 14,
-
-        ];
-
-        // Circle
-        // let (vertices, indices) = vertices_and_indices_circle(0.0, 0.0, 0.8);
-
+        let lunarsurface: Mesh = mesh::Terrain::load("./resources/lunarsurface.obj");
 
         let my_vao = unsafe {
-            let vao = create_vao(&vertices, &vertcies_colors, &indices);
+            let vao = create_vao(
+                &lunarsurface.vertices, 
+                &lunarsurface.colors, 
+                &lunarsurface.indices,
+                &lunarsurface.normals);
             vao
         };
-        let index_count = indices.len() as i32; // keep this for gl::DrawElements
 
-        // == // Set up your shaders here
+        // == // Shaders
         // Basic usage of shader helper:
         // The example code below creates a 'shader' object.
         // It which contains the field `.program_id` and the method `.activate()`.
@@ -359,39 +330,8 @@ fn main() {
                 // == // Issue the necessary gl:: commands to draw your scene here
                 simple_shader.activate();
 
-                // To flip the scene we insert these coordinates: (-1.0, -1.0, 1.0)
-                // Just change the signs of the x and y axis.
-                // let reflect = glm::scaling(&glm::vec3(-1.0, -1.0, 1.0)); 
-                // gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, reflect.as_ptr());
-
-                // let oscillation = elapsed.sin();
                 
                 let mut model = glm::Mat4::identity();
-
-                // Scaling: Changes size. Just multiplies the stuff with a value to scale it
-                // let a = 1.0 * oscillation;
-                // let e = 1.0;
-                // let scaling = glm::scaling(&glm::vec3(a, e, 1.0));
-                // model = scaling * model;
-
-                // Shearing. There isnt a specific method for this, so we insert into matrix directly
-                // let b = 0.0 * oscillation; 
-                // let d = 0.0; 
-                // let shear = glm::mat4(
-                //     1.0, d,   0.0, 0.0,
-                //     b,   1.0, 0.0, 0.0,
-                //     0.0, 0.0, 1.0, 0.0,
-                //     0.0, 0.0, 0.0, 1.0,
-                // );
-                // model = shear * model;
-
-                // Figure rotation. 
-                // let rotation = glm::rotation(elapsed, &glm::vec3(0.0, 0.0, 1.0));
-                // model = rotation * model;
-
-                // Translation
-                // let c = 0.0 * oscillation;
-                // let f = 0.0;
 
                 let translation = glm::translation(&glm::vec3(x, y, z));
                 model = translation * model;
@@ -400,14 +340,14 @@ fn main() {
                 let rotate_y_axis = glm::rotate_y(&model, theta_y);
                 model = rotate_x_axis* rotate_y_axis * model;
 
-                let projection: glm::Mat4 = glm::perspective(window_aspect_ratio, 0.6, 1.0, 100.0);
+                let projection: glm::Mat4 = glm::perspective(window_aspect_ratio, 0.6, 1.0, 1000.0);
 
                 model = projection * model;
 
                 gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, model.as_ptr());
 
                 gl::DepthMask(gl::FALSE); // Disable while drawing, then enable again               
-                gl::DrawElements(gl::TRIANGLES, index_count, gl::UNSIGNED_INT, std::ptr::null());
+                gl::DrawElements(gl::TRIANGLES, lunarsurface.index_count, gl::UNSIGNED_INT, std::ptr::null());
                 gl::DepthMask(gl::TRUE);
 
             }
