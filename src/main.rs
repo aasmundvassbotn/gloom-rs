@@ -21,7 +21,7 @@ use std::ffi::CString;
 use glutin::event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState::{Pressed, Released}, VirtualKeyCode::{self, *}};
 use glutin::event_loop::ControlFlow;
 
-use crate::mesh::Mesh;
+use crate::mesh::{Helicopter, Mesh};
 
 // initial window size
 const INITIAL_SCREEN_W: u32 = 800;
@@ -49,6 +49,17 @@ fn size_of<T>() -> i32 {
 // Example usage:  offset::<u64>(4)
 fn offset<T>(n: u32) -> *const c_void {
     (n * mem::size_of::<T>() as u32) as *const T as *const c_void
+}
+
+// Helper functions to simplify handling of vao's
+unsafe fn create_vao_from_mesh(mesh: &mesh::Mesh) -> (u32, i32){
+    let vao = create_vao(&mesh.vertices, &mesh.colors, &mesh.indices, &mesh.normals);
+    (vao, mesh.index_count)
+}
+
+unsafe fn draw_vao(vao: u32, index_count: i32){
+    gl::BindVertexArray(vao);
+    gl::DrawElements(gl::TRIANGLES, index_count, gl::UNSIGNED_INT, std::ptr::null())
 }
 
 unsafe fn create_vao(vertices: &Vec<f32>, vertices_color: &Vec<f32>, indices: &Vec<u32>, normals: &Vec<f32>) -> u32 {
@@ -226,15 +237,18 @@ fn main() {
         }
 
         let lunarsurface: Mesh = mesh::Terrain::load("./resources/lunarsurface.obj");
+        let helicopter: Helicopter = mesh::Helicopter::load("./resources/helicopter.obj");
+        let door = helicopter.door;
+        let body = helicopter.body;
+        let main_rotor = helicopter.main_rotor;
+        let tail_rotor = helicopter.tail_rotor;
 
-        let my_vao = unsafe {
-            let vao = create_vao(
-                &lunarsurface.vertices, 
-                &lunarsurface.colors, 
-                &lunarsurface.indices,
-                &lunarsurface.normals);
-            vao
-        };
+        let (lunarsurface_vao, lunarsurface_indexcount) = unsafe{create_vao_from_mesh(&lunarsurface)};
+        let (body_vao, body_indexcount) = unsafe{create_vao_from_mesh(&body)};
+        let (door_vao, door_indexcount) = unsafe{create_vao_from_mesh(&door)};
+        let (main_rotor_vao, main_rotor_indexcount) = unsafe{create_vao_from_mesh(&main_rotor)};
+        let (tail_rotor_vao, tail_rotor_indexcount) = unsafe{create_vao_from_mesh(&tail_rotor)};
+
 
         // == // Shaders
         // Basic usage of shader helper:
@@ -329,10 +343,8 @@ fn main() {
 
                 // == // Issue the necessary gl:: commands to draw your scene here
                 simple_shader.activate();
-
                 
                 let mut model = glm::Mat4::identity();
-
                 let translation = glm::translation(&glm::vec3(x, y, z));
                 model = translation * model;
 
@@ -346,8 +358,12 @@ fn main() {
 
                 gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, model.as_ptr());
 
-                gl::DepthMask(gl::FALSE); // Disable while drawing, then enable again               
-                gl::DrawElements(gl::TRIANGLES, lunarsurface.index_count, gl::UNSIGNED_INT, std::ptr::null());
+                gl::DepthMask(gl::FALSE); // Disable while drawing, then enable again
+                draw_vao(lunarsurface_vao, lunarsurface_indexcount);
+                draw_vao(body_vao, body_indexcount);
+                draw_vao(door_vao, door_indexcount);
+                draw_vao(main_rotor_vao, main_rotor_indexcount);
+                draw_vao(tail_rotor_vao, tail_rotor_indexcount);
                 gl::DepthMask(gl::TRUE);
 
             }
