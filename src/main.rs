@@ -15,6 +15,8 @@ use std::sync::{Mutex, Arc, RwLock};
 mod shader;
 mod util;
 mod mesh;
+mod scene_graph;
+use scene_graph::SceneNode;
 
 use std::ffi::CString;
 
@@ -60,6 +62,44 @@ unsafe fn create_vao_from_mesh(mesh: &mesh::Mesh) -> (u32, i32){
 unsafe fn draw_vao(vao: u32, index_count: i32){
     gl::BindVertexArray(vao);
     gl::DrawElements(gl::TRIANGLES, index_count, gl::UNSIGNED_INT, std::ptr::null())
+}
+
+unsafe fn draw_scene(
+    node: &scene_graph::SceneNode,
+    view_projection_matrix: &glm::Mat4,
+    transformation_so_far: &glm::Mat4,
+    u_transform_loc: i32,
+    ) {
+    // Perform any logic needed before drawing the node
+    // Check if node is drawable, if so: set uniforms, bind VAO and draw VAO
+    // Recurse
+    let t = glm::translation(&node.position);
+
+    let mut r: glm::Mat4 = glm::identity();
+    r = glm::rotate_x(&r, node.rotation.x);
+    r = glm::rotate_y(&r, node.rotation.y);
+    r = glm::rotate_z(&r, node.rotation.z);
+
+    // Pivot: rotate around reference_point
+    let to_pivot     = glm::translation(&node.reference_point);
+    let from_pivot   = glm::translation(&(-node.reference_point));
+
+    // Optional scaling if you add it later:
+    // let s = glm::scale(&glm::identity(), &node.scale);
+
+    let local = t * to_pivot * r * from_pivot;
+
+    let world = transformation_so_far * local;
+    let mvp   = view_projection_matrix * world;
+
+    gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, mvp.as_ptr());
+    if node.index_count > 0 {
+        draw_vao(node.vao_id, node.index_count);
+    }
+
+    for &child in &node.children {
+        draw_scene(&*child, view_projection_matrix, &world, u_transform_loc);
+    }
 }
 
 unsafe fn create_vao(vertices: &Vec<f32>, vertices_color: &Vec<f32>, indices: &Vec<u32>, normals: &Vec<f32>) -> u32 {
@@ -249,7 +289,27 @@ fn main() {
         let (main_rotor_vao, main_rotor_indexcount) = unsafe{create_vao_from_mesh(&main_rotor)};
         let (tail_rotor_vao, tail_rotor_indexcount) = unsafe{create_vao_from_mesh(&tail_rotor)};
 
+        let mut scene = SceneNode::new();
+        let lunarsurface_scene = SceneNode::from_vao(lunarsurface_vao, lunarsurface_indexcount);
+        let mut body_scene = SceneNode::from_vao(body_vao, body_indexcount);
+        let door_scene = SceneNode::from_vao(door_vao, door_indexcount);
+        let mut main_rotor_scene = SceneNode::from_vao(main_rotor_vao, main_rotor_indexcount);
+        let mut tail_rotor_scene = SceneNode::from_vao(tail_rotor_vao, tail_rotor_indexcount);
 
+        // Set referance points. Currently, i only see the tail as relavant since the top rotor will spin around center point anyways
+        tail_rotor_scene.reference_point = nalgebra_glm::Vec3::new(0.35, 2.3, 10.4);
+
+        scene.add_child(&lunarsurface_scene);
+        scene.add_child(&body_scene);
+        body_scene.add_child(&door_scene);
+        body_scene.add_child(&main_rotor_scene);
+        body_scene.add_child(&tail_rotor_scene);
+
+        // Test to see scene rendering working properly
+        //body_scene.rotation = nalgebra_glm::Vec3::new(-0.1, 0.0, 0.0);
+
+        scene.print();
+        body_scene.print();
         // == // Shaders
         // Basic usage of shader helper:
         // The example code below creates a 'shader' object.
@@ -274,21 +334,27 @@ fn main() {
         // Used to demonstrate keyboard handling for exercise 2.
         let mut _arbitrary_number = 0.0; // feel free to remove
 
-
-        // The main rendering loop
+        // Variables for the camera projection
         let first_frame_time = std::time::Instant::now();
         let mut previous_frame_time = first_frame_time;
-        let mut x = 0.0;
-        let mut y = 0.0;
-        let mut z = -3.0;
-        let mut theta_x: f32 = 0.0;
-        let mut theta_y: f32 = 0.0;
+        let mut x = 10.0;
+        let mut y = -3.0;
+        let mut z = 10.0;
+        let mut theta_x: f32 = 0.2;
+        let mut theta_y: f32 = 2.3;
+        
+        // The main rendering loop
         loop {
             // Compute time passed since the previous frame and since the start of the program
             let now = std::time::Instant::now();
             let elapsed = now.duration_since(first_frame_time).as_secs_f32();
             let delta_time = now.duration_since(previous_frame_time).as_secs_f32();
             previous_frame_time = now;
+
+            main_rotor_scene.rotation.y = elapsed * 10.0;
+            tail_rotor_scene.rotation.x = elapsed * 10.0;
+
+            //body_scene.position.z = -elapsed;
 
             // Handle resize events
             if let Ok(mut new_size) = window_size.lock() {
@@ -344,26 +410,17 @@ fn main() {
                 // == // Issue the necessary gl:: commands to draw your scene here
                 simple_shader.activate();
                 
-                let mut model = glm::Mat4::identity();
+                let mut view_projection_matrix = glm::Mat4::identity();
                 let translation = glm::translation(&glm::vec3(x, y, z));
-                model = translation * model;
-
-                let rotate_x_axis = glm::rotate_x(&model, theta_x);
-                let rotate_y_axis = glm::rotate_y(&model, theta_y);
-                model = rotate_x_axis* rotate_y_axis * model;
-
+                let rotate_x_axis = glm::rotate_x(&view_projection_matrix, theta_x);
+                let rotate_y_axis = glm::rotate_y(&view_projection_matrix, theta_y);
                 let projection: glm::Mat4 = glm::perspective(window_aspect_ratio, 0.6, 1.0, 1000.0);
 
-                model = projection * model;
+                view_projection_matrix = projection * rotate_x_axis* rotate_y_axis * translation * view_projection_matrix;
 
-                gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, model.as_ptr());
-
+                let translation_so_far = glm::Mat4::identity();
                 gl::DepthMask(gl::FALSE); // Disable while drawing, then enable again
-                draw_vao(lunarsurface_vao, lunarsurface_indexcount);
-                draw_vao(body_vao, body_indexcount);
-                draw_vao(door_vao, door_indexcount);
-                draw_vao(main_rotor_vao, main_rotor_indexcount);
-                draw_vao(tail_rotor_vao, tail_rotor_indexcount);
+                draw_scene(&scene, &view_projection_matrix, &translation_so_far, u_transform_loc);
                 gl::DepthMask(gl::TRUE);
 
             }
