@@ -17,6 +17,8 @@ mod util;
 mod mesh;
 mod scene_graph;
 use scene_graph::SceneNode;
+mod toolbox;
+
 
 use std::ffi::CString;
 
@@ -24,6 +26,7 @@ use glutin::event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState
 use glutin::event_loop::ControlFlow;
 
 use crate::mesh::{Helicopter, Mesh};
+use crate::toolbox::Heading;
 
 // initial window size
 const INITIAL_SCREEN_W: u32 = 800;
@@ -64,15 +67,23 @@ unsafe fn draw_vao(vao: u32, index_count: i32){
     gl::DrawElements(gl::TRIANGLES, index_count, gl::UNSIGNED_INT, std::ptr::null())
 }
 
+fn apply_heading(helicopter_body: &mut SceneNode, time: f32) {
+    let heading: Heading = toolbox::simple_heading_animation(time);
+    helicopter_body.position.x = heading.x;
+    helicopter_body.position.z = heading.z;
+
+    helicopter_body.rotation.z = heading.roll;
+    helicopter_body.rotation.x = heading.pitch;
+    helicopter_body.rotation.y = heading.yaw;
+}
+
 unsafe fn draw_scene(
     node: &scene_graph::SceneNode,
     view_projection_matrix: &glm::Mat4,
     transformation_so_far: &glm::Mat4,
-    u_transform_loc: i32,
+    u_model_loc: i32,
+    u_view_loc: i32,
     ) {
-    // Perform any logic needed before drawing the node
-    // Check if node is drawable, if so: set uniforms, bind VAO and draw VAO
-    // Recurse
     let t = glm::translation(&node.position);
 
     let mut r: glm::Mat4 = glm::identity();
@@ -80,25 +91,25 @@ unsafe fn draw_scene(
     r = glm::rotate_y(&r, node.rotation.y);
     r = glm::rotate_z(&r, node.rotation.z);
 
-    // Pivot: rotate around reference_point
     let to_pivot     = glm::translation(&node.reference_point);
     let from_pivot   = glm::translation(&(-node.reference_point));
-
-    // Optional scaling if you add it later:
-    // let s = glm::scale(&glm::identity(), &node.scale);
-
     let local = t * to_pivot * r * from_pivot;
+    let model = transformation_so_far * local;
 
-    let world = transformation_so_far * local;
-    let mvp   = view_projection_matrix * world;
+    gl::UniformMatrix4fv(u_model_loc, 1, gl::FALSE, model.as_ptr());
+    gl::UniformMatrix4fv(u_view_loc, 1, gl::FALSE, view_projection_matrix.as_ptr());
 
-    gl::UniformMatrix4fv(u_transform_loc, 1, gl::FALSE, mvp.as_ptr());
     if node.index_count > 0 {
         draw_vao(node.vao_id, node.index_count);
     }
-
     for &child in &node.children {
-        draw_scene(&*child, view_projection_matrix, &world, u_transform_loc);
+        draw_scene(
+            &*child, 
+            view_projection_matrix, 
+            &model, 
+            u_model_loc, 
+            u_view_loc
+        );
     }
 }
 
@@ -187,36 +198,6 @@ unsafe fn create_vao(vertices: &Vec<f32>, vertices_color: &Vec<f32>, indices: &V
     vao
 }
 
-// I just assume the color red, and i just use z = 0. So just in xy-plane
-fn vertices_and_indices_circle(cx: f32, cy: f32, r: f32) -> (Vec<f32>, Vec<u32>){
-    let segments: usize = 16;
-
-    // x, y, z, r, g, b
-    let mut vertices = Vec::<f32>::with_capacity((segments + 1) * 6);
-    let mut indices  = Vec::<u32>::with_capacity(segments * 3);
-
-    // Center
-    vertices.extend_from_slice(&[cx, cy, 0.0, 1.0, 0.0, 0.0]);
-
-    // Constr circlepoints with maths
-    let two_pi = std::f32::consts::PI * 2.0;
-    for i in 0..segments {
-        let t = i as f32 * two_pi / segments as f32;
-        let x = cx + r * t.cos();
-        let y = cy + r * t.sin();
-        vertices.extend_from_slice(&[x, y, 0.0, 1.0, 0.0, 0.0]);
-    }
-
-    // Indices
-    for i in 0..segments {
-        let i1 = (i as u32) + 1;
-        let i2 = ((i as u32 + 1) % segments as u32) + 1;
-        indices.extend_from_slice(&[0, i1, i2]);
-    }
-
-    (vertices, indices)
-}
-
 fn main() {
     // Set up the necessary objects to deal with windows and event handling
     let el = glutin::event_loop::EventLoop::new();
@@ -227,10 +208,6 @@ fn main() {
     let cb = glutin::ContextBuilder::new()
         .with_vsync(true);
     let windowed_context = cb.build_windowed(wb, &el).unwrap();
-    // Uncomment these if you want to use the mouse for controls, but want it to be confined to the screen and/or invisible.
-    // windowed_context.window().set_cursor_grab(true).expect("failed to grab cursor");
-    // windowed_context.window().set_cursor_visible(false);
-
     // Set up a shared vector for keeping track of currently pressed keys
     let arc_pressed_keys = Arc::new(Mutex::new(Vec::<VirtualKeyCode>::with_capacity(10)));
     // Make a reference of this vector to send to the render thread
@@ -278,10 +255,10 @@ fn main() {
 
         let lunarsurface: Mesh = mesh::Terrain::load("./resources/lunarsurface.obj");
         let helicopter: Helicopter = mesh::Helicopter::load("./resources/helicopter.obj");
-        let door = helicopter.door;
-        let body = helicopter.body;
-        let main_rotor = helicopter.main_rotor;
-        let tail_rotor = helicopter.tail_rotor;
+        let door: Mesh = helicopter.door;
+        let body: Mesh = helicopter.body;
+        let main_rotor: Mesh = helicopter.main_rotor;
+        let tail_rotor: Mesh = helicopter.tail_rotor;
 
         let (lunarsurface_vao, lunarsurface_indexcount) = unsafe{create_vao_from_mesh(&lunarsurface)};
         let (body_vao, body_indexcount) = unsafe{create_vao_from_mesh(&body)};
@@ -291,32 +268,29 @@ fn main() {
 
         let mut scene = SceneNode::new();
         let lunarsurface_scene = SceneNode::from_vao(lunarsurface_vao, lunarsurface_indexcount);
-        let mut body_scene = SceneNode::from_vao(body_vao, body_indexcount);
-        let door_scene = SceneNode::from_vao(door_vao, door_indexcount);
-        let mut main_rotor_scene = SceneNode::from_vao(main_rotor_vao, main_rotor_indexcount);
-        let mut tail_rotor_scene = SceneNode::from_vao(tail_rotor_vao, tail_rotor_indexcount);
-
-        // Set referance points. Currently, i only see the tail as relavant since the top rotor will spin around center point anyways
-        tail_rotor_scene.reference_point = nalgebra_glm::Vec3::new(0.35, 2.3, 10.4);
-
         scene.add_child(&lunarsurface_scene);
-        scene.add_child(&body_scene);
-        body_scene.add_child(&door_scene);
-        body_scene.add_child(&main_rotor_scene);
-        body_scene.add_child(&tail_rotor_scene);
 
-        // Test to see scene rendering working properly
-        //body_scene.rotation = nalgebra_glm::Vec3::new(-0.1, 0.0, 0.0);
+        // We iterate 5 times and create helicopters. The helicopters are stored as children
+        let mut i = 0;
+        while i < 5 {
+            let mut body_scene = SceneNode::from_vao(body_vao, body_indexcount);
+            let door_scene = SceneNode::from_vao(door_vao, door_indexcount);
+            let main_rotor_scene = SceneNode::from_vao(main_rotor_vao, main_rotor_indexcount);
+            let mut tail_rotor_scene = SceneNode::from_vao(tail_rotor_vao, tail_rotor_indexcount);
+    
+            // Set the tail reference point. This prevents the tail rotor from spinning around the body chassis of the helicopter
+            tail_rotor_scene.reference_point = nalgebra_glm::Vec3::new(0.35, 2.3, 10.4);
+    
+            body_scene.add_child(&door_scene);
+            body_scene.add_child(&main_rotor_scene);
+            body_scene.add_child(&tail_rotor_scene);
+            
+            scene.add_child(&body_scene);
+
+            i = i + 1;
+        } // After the loop, we essentially have 5 helicopters in the exact same spot
 
         scene.print();
-        body_scene.print();
-        // == // Shaders
-        // Basic usage of shader helper:
-        // The example code below creates a 'shader' object.
-        // It which contains the field `.program_id` and the method `.activate()`.
-        // The `.` in the path is relative to `Cargo.toml`.
-        // This snippet is not enough to do the exercise, and will need to be modified (outside
-        // of just using the correct path), but it only needs to be called once
 
         let simple_shader = unsafe {
             shader::ShaderBuilder::new()
@@ -325,23 +299,26 @@ fn main() {
                 .link()
         };
         
-        let u_transform_loc = unsafe {
-            let name = CString::new("uTransform").unwrap();
+        let u_view_loc = unsafe {
+            let name = CString::new("modelViewProj").unwrap();
             gl::GetUniformLocation(simple_shader.program_id, name.as_ptr())
         };
 
-
-        // Used to demonstrate keyboard handling for exercise 2.
-        let mut _arbitrary_number = 0.0; // feel free to remove
+        let u_model_loc = unsafe {
+            let name = CString::new("model").unwrap();
+            gl::GetUniformLocation(simple_shader.program_id, name.as_ptr())
+        };
 
         // Variables for the camera projection
         let first_frame_time = std::time::Instant::now();
         let mut previous_frame_time = first_frame_time;
-        let mut x = 10.0;
+        let mut x = 50.0;
         let mut y = -3.0;
-        let mut z = 10.0;
+        let mut z = 50.0;
         let mut theta_x: f32 = 0.2;
         let mut theta_y: f32 = 2.3;
+
+        let mut helicopter_doors_slider_value = 0.0;
         
         // The main rendering loop
         loop {
@@ -351,10 +328,21 @@ fn main() {
             let delta_time = now.duration_since(previous_frame_time).as_secs_f32();
             previous_frame_time = now;
 
-            main_rotor_scene.rotation.y = elapsed * 10.0;
-            tail_rotor_scene.rotation.x = elapsed * 10.0;
+            let helicopter_count = scene.children.len();
+            for j in 1..helicopter_count {
+                let helicopter = scene.get_child(j);
 
-            //body_scene.position.z = -elapsed;
+                // Controll doors
+                helicopter.get_child(0).position.z = helicopter_doors_slider_value;
+
+                // Spin rotors
+                helicopter.get_child(1).rotation.y = elapsed * 10.0;
+                helicopter.get_child(2).rotation.x = elapsed * 10.0;
+
+
+
+                apply_heading(helicopter, elapsed + (j as f32 - 1.0) * 0.85);
+            }
 
             // Handle resize events
             if let Ok(mut new_size) = window_size.lock() {
@@ -374,18 +362,29 @@ fn main() {
                         // The `VirtualKeyCode` enum is defined here:
                         //    https://docs.rs/winit/0.25.0/winit/event/enum.VirtualKeyCode.html
 
-                        VirtualKeyCode::A => {x += delta_time;}
-                        VirtualKeyCode::D => {x -= delta_time;}
-                        VirtualKeyCode::W => {y -= delta_time;}
-                        VirtualKeyCode::S => {y += delta_time;}
+                        VirtualKeyCode::A => {x += delta_time * 7.5;}
+                        VirtualKeyCode::D => {x -= delta_time * 7.5;}
+                        VirtualKeyCode::W => {y -= delta_time * 7.5;}
+                        VirtualKeyCode::S => {y += delta_time * 7.5;}
 
-                        VirtualKeyCode::Space =>  {z += delta_time;}
-                        VirtualKeyCode::LShift => {z -= delta_time;}
+                        VirtualKeyCode::Space =>  {z += delta_time * 7.5;}
+                        VirtualKeyCode::LShift => {z -= delta_time * 7.5;}
 
                         VirtualKeyCode::Up =>     {theta_x -= delta_time;}
                         VirtualKeyCode::Down =>   {theta_x += delta_time;}
                         VirtualKeyCode::Right =>  {theta_y += delta_time;}
                         VirtualKeyCode::Left =>   {theta_y -= delta_time;}
+
+                        VirtualKeyCode::J => {
+                            if helicopter_doors_slider_value < 2.0 {
+                                helicopter_doors_slider_value += delta_time * 5.0;
+                            }
+                        }
+                        VirtualKeyCode::K => {
+                            if helicopter_doors_slider_value > 0.0 {
+                                helicopter_doors_slider_value -= delta_time * 5.0;
+                            }
+                        }
 
                         // default handler:
                         _ => { }
@@ -407,7 +406,6 @@ fn main() {
                 gl::ClearColor(0.035, 0.046, 0.078, 1.0); // night sky
                 gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
 
-                // == // Issue the necessary gl:: commands to draw your scene here
                 simple_shader.activate();
                 
                 let mut view_projection_matrix = glm::Mat4::identity();
@@ -419,23 +417,16 @@ fn main() {
                 view_projection_matrix = projection * rotate_x_axis* rotate_y_axis * translation * view_projection_matrix;
 
                 let translation_so_far = glm::Mat4::identity();
-                gl::DepthMask(gl::FALSE); // Disable while drawing, then enable again
-                draw_scene(&scene, &view_projection_matrix, &translation_so_far, u_transform_loc);
-                gl::DepthMask(gl::TRUE);
-
+                //gl::DepthMask(gl::FALSE); // Disable while drawing, then enable again
+                draw_scene(&scene, &view_projection_matrix, &translation_so_far, u_model_loc, u_view_loc);
+                //gl::DepthMask(gl::TRUE);
             }
-
             // Display the new color buffer on the display
             context.swap_buffers().unwrap(); // we use "double buffering" to avoid artifacts
         }
     });
 
-
-    // == //
     // == // From here on down there are only internals.
-    // == //
-
-
     // Keep track of the health of the rendering thread
     let render_thread_healthy = Arc::new(RwLock::new(true));
     let render_thread_watchdog = Arc::clone(&render_thread_healthy);
